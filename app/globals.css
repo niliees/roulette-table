@@ -1,22 +1,119 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a1628;
+  --foreground: #f0e6c8;
+  --gold: #c9a84c;
+  --felt-green: #1a5c38;
+  --felt-dark: #0f3d25;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Georgia', serif;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+@keyframes wheelSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(var(--spin-amount, 1800deg)); }
+}
+
+@keyframes chipBounce {
+  0% { transform: translate(-50%, -50%) scale(0) rotate(-180deg); opacity: 0; }
+  60% { transform: translate(-50%, -50%) scale(1.2) rotate(10deg); }
+  80% { transform: translate(-50%, -50%) scale(0.9) rotate(-5deg); }
+  100% { transform: translate(-50%, -50%) scale(1) rotate(0deg); opacity: 1; }
+}
+
+@keyframes winPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(201, 168, 76, 0.4); }
+  50% { box-shadow: 0 0 25px rgba(201, 168, 76, 1), 0 0 50px rgba(201, 168, 76, 0.6); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes floatUp {
+  0% { transform: translateY(0) scale(1); opacity: 1; }
+  100% { transform: translateY(-80px) scale(1.5); opacity: 0; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes ballOrbit {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse-gold {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+.chip-placed {
+  animation: chipBounce 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+.win-cell {
+  animation: winPulse 0.6s ease-in-out infinite;
+}
+
+.gold-shimmer {
+  background: linear-gradient(90deg, #c9a84c 0%, #f5d67a 50%, #c9a84c 100%);
+  background-size: 200% auto;
+  animation: shimmer 2s linear infinite;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.float-up {
+  animation: floatUp 1s ease-out forwards;
+}
+
+.bet-cell {
+  transition: filter 0.15s ease, transform 0.1s ease;
+  cursor: pointer;
+  position: relative;
+  user-select: none;
+}
+
+.bet-cell:hover {
+  filter: brightness(1.5);
+  z-index: 10;
+}
+
+.bet-cell:active {
+  transform: scale(0.95);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0a1628;
+}
+::-webkit-scrollbar-thumb {
+  background: #c9a84c;
+  border-radius: 3px;
 }
 
 body {
