@@ -149,7 +149,11 @@ export default function PokerPage() {
   const [result, setResult] = useState<HandResult | null>(null);
   const [showAdmin, setShowAdmin] = useState(false);
   const [infiniteBalance, setInfiniteBalance] = useState(false);
+  const [adminTab, setAdminTab] = useState<"control"|"stats">("control");
+  const [forceHandResult, setForceHandResult] = useState<string | null>(null);
+  const [pokerStats, setPokerStats] = useState<Record<string, number>>({});
   const infiniteBalRef = useRef(false);
+  const forceHandRef = useRef<string | null>(null);
 
   useEffect(() => {
     window.admin = () => setShowAdmin(true);
@@ -194,8 +198,12 @@ export default function PokerPage() {
     setHand(newHand);
     setPhase("draw");
 
-    const res = evaluateHand(newHand);
+    const baseRes = evaluateHand(newHand);
+    const forcedName = forceHandRef.current;
+    const forced = forcedName ? PAY_TABLE.find(p => p.name === forcedName) : null;
+    const res: HandResult = forced ? { name: forced.name, multiplier: forced.mult } : baseRes;
     setResult(res);
+    setPokerStats(s => ({ ...s, [res.name]: (s[res.name] || 0) + 1 }));
 
     const payout = bet * res.multiplier;
     const rawBal = res.multiplier > 0
@@ -355,20 +363,88 @@ export default function PokerPage() {
         onSetBalance={(n) => { setBalance(n); saveBalance(n); }}
       >
         <div>
-          <div style={{ color: "rgba(240,230,200,0.4)", letterSpacing: 1, marginBottom: 8, fontSize: 10, textTransform: "uppercase" }}>Game Settings</div>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={infiniteBalance}
-              onChange={() => {
-                const next = !infiniteBalRef.current;
-                infiniteBalRef.current = next;
-                setInfiniteBalance(next);
-              }}
-              style={{ width: 14, height: 14, cursor: "pointer" }}
-            />
-            <span style={{ color: "#f0e6c8", fontSize: 12 }}>Infinite Balance (can&apos;t lose)</span>
-          </label>
+          {/* Admin Tabs */}
+          <div style={{ display: "flex", marginBottom: 10, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+            {(["control","stats"] as const).map(tab => (
+              <button key={tab} onClick={() => setAdminTab(tab)} style={{
+                flex: 1, padding: "5px 0", fontSize: 10, letterSpacing: 1, textTransform: "uppercase",
+                background: "transparent", border: "none",
+                borderBottom: `1px solid ${adminTab === tab ? "#c9a84c" : "transparent"}`,
+                color: adminTab === tab ? "#c9a84c" : "rgba(240,230,200,0.3)",
+                cursor: "pointer", fontFamily: "monospace", marginBottom: -1,
+              }}>{tab}</button>
+            ))}
+          </div>
+
+          {adminTab === "control" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                <div>
+                  <div style={{ fontSize: 12, color: "#f0e6c8" }}>Infinite Balance</div>
+                  <div style={{ fontSize: 10, color: "rgba(240,230,200,0.35)" }}>Can&apos;t lose chips</div>
+                </div>
+                <input type="checkbox" checked={infiniteBalance} onChange={() => { const n = !infiniteBalRef.current; infiniteBalRef.current = n; setInfiniteBalance(n); }} style={{ width: 14, height: 14, cursor: "pointer" }} />
+              </label>
+              <div>
+                <div style={{ color: "rgba(240,230,200,0.4)", fontSize: 10, letterSpacing: 1, marginBottom: 6 }}>FORCE HAND RESULT</div>
+                <select
+                  value={forceHandResult ?? ""}
+                  onChange={e => { const v = e.target.value || null; forceHandRef.current = v; setForceHandResult(v); }}
+                  style={{
+                    width: "100%", padding: "6px 8px", borderRadius: 5,
+                    background: "rgba(0,0,0,0.4)", border: `1px solid ${forceHandResult ? "rgba(201,168,76,0.5)" : "rgba(255,255,255,0.1)"}`,
+                    color: forceHandResult ? "#c9a84c" : "rgba(240,230,200,0.5)",
+                    fontSize: 11, cursor: "pointer", fontFamily: "monospace",
+                  }}
+                >
+                  <option value="">Random (no override)</option>
+                  {PAY_TABLE.map(p => (
+                    <option key={p.name} value={p.name}>{p.name} ({p.mult}×)</option>
+                  ))}
+                </select>
+                {forceHandResult && (
+                  <div style={{ fontSize: 10, color: "#c9a84c", marginTop: 4 }}>Override active: {forceHandResult}</div>
+                )}
+              </div>
+              <button onClick={() => setPokerStats({})}
+                style={{ padding: "5px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, color: "rgba(240,230,200,0.4)", cursor: "pointer", fontSize: 10, letterSpacing: 1 }}>
+                RESET STATS
+              </button>
+            </div>
+          )}
+
+          {adminTab === "stats" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {Object.keys(pokerStats).length === 0 ? (
+                <div style={{ fontSize: 11, color: "rgba(240,230,200,0.3)", textAlign: "center", padding: "16px 0", fontFamily: "monospace" }}>No hands played yet</div>
+              ) : (
+                <>
+                  <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: 6, padding: "6px 10px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                      <span style={{ fontSize: 11, color: "rgba(240,230,200,0.5)" }}>Total Hands</span>
+                      <span style={{ fontSize: 11, color: "#c9a84c" }}>{Object.values(pokerStats).reduce((a, b) => a + b, 0)}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 11, color: "rgba(240,230,200,0.5)" }}>Winning Hands</span>
+                      <span style={{ fontSize: 11, color: "#4ade80" }}>{Object.entries(pokerStats).filter(([k]) => k !== "No Win").reduce((a, [, v]) => a + v, 0)}</span>
+                    </div>
+                  </div>
+                  {PAY_TABLE.filter(p => pokerStats[p.name]).map(p => (
+                    <div key={p.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 6px", background: "rgba(201,168,76,0.06)", borderRadius: 4 }}>
+                      <span style={{ fontSize: 10, color: "#c9a84c" }}>{p.name}</span>
+                      <span style={{ fontSize: 11, fontFamily: "monospace", color: "#f0e6c8" }}>{pokerStats[p.name]}</span>
+                    </div>
+                  ))}
+                  {pokerStats["No Win"] && (
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 6px", background: "rgba(239,68,68,0.06)", borderRadius: 4 }}>
+                      <span style={{ fontSize: 10, color: "#f87171" }}>No Win</span>
+                      <span style={{ fontSize: 11, fontFamily: "monospace", color: "#f87171" }}>{pokerStats["No Win"]}</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
       </AdminPanel>
     </div>

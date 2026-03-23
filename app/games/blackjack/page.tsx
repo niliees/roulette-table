@@ -125,7 +125,13 @@ export default function BlackjackPage() {
   const [lastWin, setLastWin] = useState(0);
   const [showAdmin, setShowAdmin] = useState(false);
   const [infiniteBalance, setInfiniteBalance] = useState(false);
+  const [adminTab, setAdminTab] = useState<"control"|"stats">("control");
+  const [autoWin, setAutoWin] = useState(false);
+  const [forceDealerBust, setForceDealerBust] = useState(false);
+  const [bjStats, setBjStats] = useState({ hands: 0, wins: 0, losses: 0, pushes: 0 });
   const infiniteBalRef = useRef(false);
+  const autoWinRef = useRef(false);
+  const forceDealerBustRef = useRef(false);
 
   useEffect(() => {
     window.admin = () => setShowAdmin(true);
@@ -245,10 +251,17 @@ export default function BlackjackPage() {
     let dlr = dealerHand.map(c => ({ ...c, faceDown: false }));
     let card: Card;
 
-    // Dealer draws to 17+ (stands on soft 17)
-    while (handTotal(dlr) < 17 || (handTotal(dlr) === 17 && isSoft(dlr))) {
-      [card, d] = drawCard(d);
-      dlr = [...dlr, { ...card, faceDown: false }];
+    // Dealer draws (force bust or normal 17+ rule)
+    if (forceDealerBustRef.current) {
+      while (handTotal(dlr) <= 21) {
+        [card, d] = drawCard(d);
+        dlr = [...dlr, { ...card, faceDown: false }];
+      }
+    } else {
+      while (handTotal(dlr) < 17 || (handTotal(dlr) === 17 && isSoft(dlr))) {
+        [card, d] = drawCard(d);
+        dlr = [...dlr, { ...card, faceDown: false }];
+      }
     }
 
     setDeck(d);
@@ -281,15 +294,25 @@ export default function BlackjackPage() {
     setMessage(msg);
     setLastWin(winAmt);
     // For push, bet is refunded; for win, net positive; for loss, already deducted
-    if (playerTotal > dealerTotal || dealerTotal > 21) {
+    const playerWon = playerTotal > dealerTotal || dealerTotal > 21;
+    const pushResult = playerTotal === dealerTotal;
+    const adminOverride = autoWinRef.current && !pushResult && playerTotal <= 21;
+    if (adminOverride) { setMessage(`Admin override — You win $${activeBet}!`); setLastWin(activeBet); }
+    if (playerWon || adminOverride) {
       newBal = balance + activeBet;
-    } else if (playerTotal === dealerTotal) {
+    } else if (pushResult) {
       newBal = balance; // push, no change
     } else {
       newBal = infiniteBalRef.current ? balance : balance - activeBet;
     }
     setBalance(newBal);
     saveBalance(newBal);
+    setBjStats(s => ({
+      hands: s.hands + 1,
+      wins: playerWon || adminOverride ? s.wins + 1 : s.wins,
+      losses: !playerWon && !adminOverride && !pushResult ? s.losses + 1 : s.losses,
+      pushes: pushResult ? s.pushes + 1 : s.pushes,
+    }));
   }
 
   function newRound() {
@@ -471,20 +494,77 @@ export default function BlackjackPage() {
         onSetBalance={(n) => { setBalance(n); saveBalance(n); }}
       >
         <div>
-          <div style={{ color: "rgba(240,230,200,0.4)", letterSpacing: 1, marginBottom: 8, fontSize: 10, textTransform: "uppercase" }}>Game Settings</div>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={infiniteBalance}
-              onChange={() => {
-                const next = !infiniteBalRef.current;
-                infiniteBalRef.current = next;
-                setInfiniteBalance(next);
-              }}
-              style={{ width: 14, height: 14, cursor: "pointer" }}
-            />
-            <span style={{ color: "#f0e6c8", fontSize: 12 }}>Infinite Balance (can&apos;t lose)</span>
-          </label>
+          {/* Admin Tabs */}
+          <div style={{ display: "flex", marginBottom: 10, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+            {(["control","stats"] as const).map(tab => (
+              <button key={tab} onClick={() => setAdminTab(tab)} style={{
+                flex: 1, padding: "5px 0", fontSize: 10, letterSpacing: 1, textTransform: "uppercase",
+                background: "transparent", border: "none",
+                borderBottom: `1px solid ${adminTab === tab ? "#c9a84c" : "transparent"}`,
+                color: adminTab === tab ? "#c9a84c" : "rgba(240,230,200,0.3)",
+                cursor: "pointer", fontFamily: "monospace", marginBottom: -1,
+              }}>{tab}</button>
+            ))}
+          </div>
+
+          {adminTab === "control" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {[
+                { label: "Infinite Balance", sub: "Can't lose chips", checked: infiniteBalance, onChange: () => { const n = !infiniteBalRef.current; infiniteBalRef.current = n; setInfiniteBalance(n); } },
+                { label: "Auto Win", sub: "Player always wins the hand", checked: autoWin, onChange: () => { const n = !autoWinRef.current; autoWinRef.current = n; setAutoWin(n); } },
+                { label: "Force Dealer Bust", sub: "Dealer draws until busted", checked: forceDealerBust, onChange: () => { const n = !forceDealerBustRef.current; forceDealerBustRef.current = n; setForceDealerBust(n); } },
+              ].map(item => (
+                <label key={item.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#f0e6c8" }}>{item.label}</div>
+                    <div style={{ fontSize: 10, color: "rgba(240,230,200,0.35)" }}>{item.sub}</div>
+                  </div>
+                  <input type="checkbox" checked={item.checked} onChange={item.onChange} style={{ width: 14, height: 14, cursor: "pointer" }} />
+                </label>
+              ))}
+              <button onClick={() => setBjStats({ hands: 0, wins: 0, losses: 0, pushes: 0 })}
+                style={{ padding: "5px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, color: "rgba(240,230,200,0.4)", cursor: "pointer", fontSize: 10, letterSpacing: 1 }}>
+                RESET STATS
+              </button>
+            </div>
+          )}
+
+          {adminTab === "stats" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 4 }}>
+                {[{ l: "HANDS", v: bjStats.hands, c: "#f0e6c8" }, { l: "WINS", v: bjStats.wins, c: "#4ade80" }, { l: "LOSSES", v: bjStats.losses, c: "#f87171" }, { l: "PUSHES", v: bjStats.pushes, c: "#c9a84c" }]
+                  .map(s => (
+                    <div key={s.l} style={{ background: "rgba(0,0,0,0.3)", borderRadius: 6, padding: "6px 2px", textAlign: "center", border: "1px solid rgba(255,255,255,0.06)" }}>
+                      <div style={{ fontSize: 16, fontWeight: "bold", color: s.c }}>{s.v}</div>
+                      <div style={{ fontSize: 8, color: "rgba(240,230,200,0.4)", letterSpacing: 1 }}>{s.l}</div>
+                    </div>
+                  ))}
+              </div>
+              <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: 6, padding: "8px 10px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                  <span style={{ fontSize: 11, color: "rgba(240,230,200,0.5)" }}>Win Rate</span>
+                  <span style={{ fontSize: 11, color: "#4ade80" }}>{bjStats.hands > 0 ? ((bjStats.wins / bjStats.hands) * 100).toFixed(1) : "0.0"}%</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 11, color: "rgba(240,230,200,0.5)" }}>Loss Rate</span>
+                  <span style={{ fontSize: 11, color: "#f87171" }}>{bjStats.hands > 0 ? ((bjStats.losses / bjStats.hands) * 100).toFixed(1) : "0.0"}%</span>
+                </div>
+              </div>
+              {bjStats.hands > 0 && (
+                <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: 6, padding: "6px 10px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <div style={{ fontSize: 9, color: "rgba(240,230,200,0.4)", letterSpacing: 1, marginBottom: 5 }}>DISTRIBUTION</div>
+                  <div style={{ height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 3, overflow: "hidden", display: "flex" }}>
+                    <div style={{ width: `${(bjStats.wins / bjStats.hands) * 100}%`, background: "#4ade80", transition: "width 0.3s" }} />
+                    <div style={{ width: `${(bjStats.pushes / bjStats.hands) * 100}%`, background: "#c9a84c", transition: "width 0.3s" }} />
+                    <div style={{ width: `${(bjStats.losses / bjStats.hands) * 100}%`, background: "#f87171", transition: "width 0.3s" }} />
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 9, color: "rgba(240,230,200,0.3)" }}>
+                    <span style={{ color: "#4ade80" }}>W</span><span style={{ color: "#c9a84c" }}>P</span><span style={{ color: "#f87171" }}>L</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </AdminPanel>
     </div>

@@ -113,11 +113,31 @@ export default function CrashPage() {
   const rafRef = useRef<number | null>(null);
   const autoCashoutRef = useRef(0);
   const infiniteBalRef = useRef(false);
+  const autoRoundRef = useRef(false);
+  const minCrashRef = useRef(0);
+  const startRoundFnRef = useRef<() => void>(() => {});
+  const [adminTab, setAdminTab] = useState<"control"|"stats">("control");
+  const [minCrashAt, setMinCrashAt] = useState("");
+  const [autoRound, setAutoRound] = useState(false);
+  const [crashStats, setCrashStats] = useState({ rounds: 0, cashed: 0, crashed: 0, sumMult: 0, best: 0 });
 
   useEffect(() => {
     window.admin = () => setShowAdmin(true);
     return () => { window.admin = undefined; };
   }, []);
+
+  useEffect(() => { startRoundFnRef.current = startRound; });
+
+  useEffect(() => {
+    if (!autoRound || (phase !== "crashed" && phase !== "cashedout")) return;
+    const t = setTimeout(() => {
+      if (!autoRoundRef.current) return;
+      phaseRef.current = "idle";
+      setPhase("idle");
+      setTimeout(() => { if (autoRoundRef.current) startRoundFnRef.current(); }, 400);
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [phase, autoRound]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function addChip(v: number) {
     if (phase !== "idle") return;
@@ -143,15 +163,17 @@ export default function CrashPage() {
     setBalance(newBal);
     saveBalance(newBal);
     setMessage({ text: `Cashed out at ${mult.toFixed(2)}\u00d7 \u2014 +$${(winnings - betRef.current).toFixed(2)}`, win: true });
-    setHistory(h => [{ value: mult, crashed: false }, ...h].slice(0, MAX_HISTORY));
-  }
+    setHistory(h => [{ value: mult, crashed: false }, ...h].slice(0, MAX_HISTORY));    setCrashStats(s => ({ rounds: s.rounds + 1, cashed: s.cashed + 1, crashed: s.crashed, sumMult: s.sumMult + mult, best: Math.max(s.best, mult) }));  }
 
   function startRound() {
-    if (bet < 1 || phase !== "idle") return;
+    if (bet < 1 || phaseRef.current !== "idle") return;
 
     const crashPoint = generateCrashPoint();
     const forcedVal = parseFloat(forceCrashAt);
-    crashPointRef.current = (!isNaN(forcedVal) && forcedVal >= 1.0) ? forcedVal : crashPoint;
+    const minVal = minCrashRef.current;
+    let cp = (!isNaN(forcedVal) && forcedVal >= 1.0) ? forcedVal : crashPoint;
+    if (minVal > 1.0 && cp < minVal) cp = parseFloat((minVal + Math.random() * 2).toFixed(2));
+    crashPointRef.current = cp;
     phaseRef.current = "running";
     multRef.current = 1.0;
     betRef.current = bet;
@@ -184,6 +206,7 @@ export default function CrashPage() {
         saveBalance(nb);
         setMessage({ text: `Cashed out at ${newMult.toFixed(2)}\u00d7 \u2014 +$${(winnings - betRef.current).toFixed(2)}`, win: true });
         setHistory(h => [{ value: newMult, crashed: false }, ...h].slice(0, MAX_HISTORY));
+        setCrashStats(s => ({ rounds: s.rounds + 1, cashed: s.cashed + 1, crashed: s.crashed, sumMult: s.sumMult + newMult, best: Math.max(s.best, newMult) }));
         return;
       }
 
@@ -197,8 +220,7 @@ export default function CrashPage() {
         balanceRef.current = nb;
         setBalance(nb);
         saveBalance(nb);
-        setMessage({ text: `Crashed at ${crashPointRef.current.toFixed(2)}\u00d7. Lost $${betRef.current}.`, win: false });
-        return;
+        setMessage({ text: `Crashed at ${crashPointRef.current.toFixed(2)}\u00d7. Lost $${betRef.current}.`, win: false });        setCrashStats(s => ({ rounds: s.rounds + 1, cashed: s.cashed, crashed: s.crashed + 1, sumMult: s.sumMult + crashPointRef.current, best: Math.max(s.best, crashPointRef.current) }));        return;
       }
 
       rafRef.current = requestAnimationFrame(tick);
@@ -208,8 +230,7 @@ export default function CrashPage() {
   }
 
   function reset() {
-    setBet(0);
-    betRef.current = 0;
+    if (!autoRoundRef.current) { setBet(0); betRef.current = 0; }
     setMultiplier(1.0);
     setMessage(null);
     setPhase("idle");
@@ -381,53 +402,94 @@ export default function CrashPage() {
         balance={balance}
         onSetBalance={(n) => { setBalance(n); saveBalance(n); balanceRef.current = n; }}
       >
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ color: "rgba(240,230,200,0.4)", letterSpacing: 1, marginBottom: 2, fontSize: 10, textTransform: "uppercase" }}>Game Settings</div>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={infiniteBalance}
-              onChange={() => {
-                const next = !infiniteBalRef.current;
-                infiniteBalRef.current = next;
-                setInfiniteBalance(next);
-              }}
-              style={{ width: 14, height: 14, cursor: "pointer" }}
-            />
-            <span style={{ color: "#f0e6c8", fontSize: 12 }}>Infinite Balance (can&apos;t lose)</span>
-          </label>
-          <div>
-            <div style={{ color: "rgba(240,230,200,0.4)", fontSize: 10, letterSpacing: 1, marginBottom: 4, textTransform: "uppercase" }}>Force next crash at</div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <input
-                type="number"
-                min="1.00"
-                step="0.1"
-                placeholder="e.g. 2.50"
-                value={forceCrashAt}
-                onChange={e => setForceCrashAt(e.target.value)}
-                style={{
-                  flex: 1, background: "rgba(255,255,255,0.06)",
-                  border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6,
-                  color: "#f0e6c8", padding: "6px 10px", fontFamily: "monospace", fontSize: 12,
-                  outline: "none",
-                }}
-              />
-              <button
-                onClick={() => setForceCrashAt("")}
-                style={{
-                  padding: "6px 10px", background: "rgba(239,68,68,0.1)",
-                  border: "1px solid rgba(239,68,68,0.25)", borderRadius: 6,
-                  color: "#f87171", cursor: "pointer", fontSize: 11,
-                }}
-              >Clear</button>
-            </div>
-            {forceCrashAt && !isNaN(parseFloat(forceCrashAt)) && (
-              <div style={{ fontFamily: "monospace", fontSize: 11, color: "#f87171", marginTop: 4 }}>
-                Next round crashes at {parseFloat(forceCrashAt).toFixed(2)}×
-              </div>
-            )}
+        <div>
+          {/* Admin Tabs */}
+          <div style={{ display: "flex", marginBottom: 10, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+            {(["control","stats"] as const).map(tab => (
+              <button key={tab} onClick={() => setAdminTab(tab)} style={{
+                flex: 1, padding: "5px 0", fontSize: 10, letterSpacing: 1, textTransform: "uppercase",
+                background: "transparent", border: "none",
+                borderBottom: `1px solid ${adminTab === tab ? "#c9a84c" : "transparent"}`,
+                color: adminTab === tab ? "#c9a84c" : "rgba(240,230,200,0.3)",
+                cursor: "pointer", fontFamily: "monospace", marginBottom: -1,
+              }}>{tab}</button>
+            ))}
           </div>
+
+          {adminTab === "control" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {[
+                { label: "Infinite Balance", sub: "Can't lose chips", checked: infiniteBalance, onChange: () => { const n = !infiniteBalRef.current; infiniteBalRef.current = n; setInfiniteBalance(n); } },
+                { label: "Auto Round", sub: "Starts next round automatically", checked: autoRound, onChange: () => { const n = !autoRoundRef.current; autoRoundRef.current = n; setAutoRound(n); } },
+              ].map(item => (
+                <label key={item.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#f0e6c8" }}>{item.label}</div>
+                    <div style={{ fontSize: 10, color: "rgba(240,230,200,0.35)" }}>{item.sub}</div>
+                  </div>
+                  <input type="checkbox" checked={item.checked} onChange={item.onChange} style={{ width: 14, height: 14, cursor: "pointer" }} />
+                </label>
+              ))}
+              <div>
+                <div style={{ color: "rgba(240,230,200,0.4)", fontSize: 10, letterSpacing: 1, marginBottom: 4 }}>FORCE CRASH AT</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input type="number" min="1.00" step="0.1" placeholder="e.g. 2.50" value={forceCrashAt}
+                    onChange={e => setForceCrashAt(e.target.value)}
+                    style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, color: "#f0e6c8", padding: "6px 10px", fontFamily: "monospace", fontSize: 12, outline: "none" }}
+                  />
+                  <button onClick={() => setForceCrashAt("")} style={{ padding: "6px 10px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: 6, color: "#f87171", cursor: "pointer", fontSize: 11 }}>Clear</button>
+                </div>
+                {forceCrashAt && !isNaN(parseFloat(forceCrashAt)) && (
+                  <div style={{ fontFamily: "monospace", fontSize: 11, color: "#f87171", marginTop: 3 }}>Crashes at {parseFloat(forceCrashAt).toFixed(2)}×</div>
+                )}
+              </div>
+              <div>
+                <div style={{ color: "rgba(240,230,200,0.4)", fontSize: 10, letterSpacing: 1, marginBottom: 4 }}>MIN CRASH AT</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input type="number" min="1.01" step="0.1" placeholder="e.g. 1.50" value={minCrashAt}
+                    onChange={e => { setMinCrashAt(e.target.value); minCrashRef.current = parseFloat(e.target.value) || 0; }}
+                    style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, color: "#f0e6c8", padding: "6px 10px", fontFamily: "monospace", fontSize: 12, outline: "none" }}
+                  />
+                  <button onClick={() => { setMinCrashAt(""); minCrashRef.current = 0; }} style={{ padding: "6px 10px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: 6, color: "#f87171", cursor: "pointer", fontSize: 11 }}>Clear</button>
+                </div>
+                {minCrashAt && !isNaN(parseFloat(minCrashAt)) && parseFloat(minCrashAt) > 1.0 && (
+                  <div style={{ fontFamily: "monospace", fontSize: 11, color: "#4ade80", marginTop: 3 }}>Min: {parseFloat(minCrashAt).toFixed(2)}×</div>
+                )}
+              </div>
+              <button onClick={() => setCrashStats({ rounds: 0, cashed: 0, crashed: 0, sumMult: 0, best: 0 })}
+                style={{ padding: "5px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, color: "rgba(240,230,200,0.4)", cursor: "pointer", fontSize: 10, letterSpacing: 1 }}>
+                RESET STATS
+              </button>
+            </div>
+          )}
+
+          {adminTab === "stats" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
+                {[{ l: "ROUNDS", v: crashStats.rounds, c: "#f0e6c8" }, { l: "CASHED", v: crashStats.cashed, c: "#4ade80" }, { l: "CRASHED", v: crashStats.crashed, c: "#f87171" }]
+                  .map(s => (
+                    <div key={s.l} style={{ background: "rgba(0,0,0,0.3)", borderRadius: 6, padding: "7px 4px", textAlign: "center", border: "1px solid rgba(255,255,255,0.06)" }}>
+                      <div style={{ fontSize: 17, fontWeight: "bold", color: s.c }}>{s.v}</div>
+                      <div style={{ fontSize: 9, color: "rgba(240,230,200,0.4)", letterSpacing: 1 }}>{s.l}</div>
+                    </div>
+                  ))}
+              </div>
+              <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: 6, padding: "8px 10px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                  <span style={{ fontSize: 11, color: "rgba(240,230,200,0.5)" }}>Cash Rate</span>
+                  <span style={{ fontSize: 11, color: "#4ade80" }}>{crashStats.rounds > 0 ? ((crashStats.cashed / crashStats.rounds) * 100).toFixed(1) : "0.0"}%</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                  <span style={{ fontSize: 11, color: "rgba(240,230,200,0.5)" }}>Avg Multiplier</span>
+                  <span style={{ fontSize: 11, color: "#c9a84c" }}>{crashStats.rounds > 0 ? (crashStats.sumMult / crashStats.rounds).toFixed(2) : "—"}×</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 11, color: "rgba(240,230,200,0.5)" }}>Best Multiplier</span>
+                  <span style={{ fontSize: 11, color: "#c9a84c" }}>{crashStats.best > 0 ? crashStats.best.toFixed(2) : "—"}×</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </AdminPanel>
     </div>

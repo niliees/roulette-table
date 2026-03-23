@@ -144,16 +144,33 @@ export default function SlotsPage() {
   const [history, setHistory] = useState<string[]>([]);
   const [showAdmin, setShowAdmin] = useState(false);
   const [infiniteBalance, setInfiniteBalance] = useState(false);
+  const [adminTab, setAdminTab] = useState<"control"|"stats">("control");
+  const [forceWinSymbol, setForceWinSymbol] = useState<number | null>(null);
+  const [autoSpin, setAutoSpin] = useState(false);
+  const [spinStats, setSpinStats] = useState({ played: 0, wins: 0, losses: 0, profit: 0 });
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const finalReelsRef = useRef<number[][]>([]);
   const stoppedRef = useRef<boolean[]>([false, false, false]);
   const infiniteBalRef = useRef(false);
+  const forceWinRef = useRef<number | null>(null);
+  const autoSpinRef = useRef(false);
+  const spinFnRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     window.admin = () => setShowAdmin(true);
     return () => { window.admin = undefined; };
   }, []);
+
+  // always keep spinFnRef pointing to the latest spin closure
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { spinFnRef.current = spin; });
+
+  useEffect(() => {
+    if (!autoSpin || spinState !== "result") return;
+    const t = setTimeout(() => { if (autoSpinRef.current) spinFnRef.current(); }, 1500);
+    return () => clearTimeout(t);
+  }, [spinState, autoSpin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function setBetDirect(v: number) {
     if (spinState === "spinning") return;
@@ -192,6 +209,12 @@ export default function SlotsPage() {
         setHistory(h => [`-$${bet}`, ...h].slice(0, 10));
       }
       setSpinState("result");
+      setSpinStats(s => ({
+        played: s.played + 1,
+        wins: result ? s.wins + 1 : s.wins,
+        losses: result ? s.losses : s.losses + 1,
+        profit: result ? s.profit + (bet * result.payout - bet) : s.profit - bet,
+      }));
     }
   }, [balance, bet]);
 
@@ -201,6 +224,10 @@ export default function SlotsPage() {
 
     // Pre-compute final reel positions
     const finals = [buildReel(), buildReel(), buildReel()];
+    if (forceWinRef.current !== null) {
+      const sym = forceWinRef.current;
+      finals[0][1] = sym; finals[1][1] = sym; finals[2][1] = sym;
+    }
     finalReelsRef.current = finals;
     stoppedRef.current = [false, false, false];
 
@@ -373,20 +400,99 @@ export default function SlotsPage() {
         onSetBalance={(n) => { setBalance(n); saveBalance(n); }}
       >
         <div>
-          <div style={{ color: "rgba(240,230,200,0.4)", letterSpacing: 1, marginBottom: 8, fontSize: 10, textTransform: "uppercase" }}>Game Settings</div>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={infiniteBalance}
-              onChange={() => {
-                const next = !infiniteBalRef.current;
-                infiniteBalRef.current = next;
-                setInfiniteBalance(next);
-              }}
-              style={{ width: 14, height: 14, cursor: "pointer" }}
-            />
-            <span style={{ color: "#f0e6c8", fontSize: 12 }}>Infinite Balance (can&apos;t lose)</span>
-          </label>
+          {/* Admin Tabs */}
+          <div style={{ display: "flex", marginBottom: 10, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+            {(["control","stats"] as const).map(tab => (
+              <button key={tab} onClick={() => setAdminTab(tab)} style={{
+                flex: 1, padding: "5px 0", fontSize: 10, letterSpacing: 1, textTransform: "uppercase",
+                background: "transparent", border: "none",
+                borderBottom: `1px solid ${adminTab === tab ? "#c9a84c" : "transparent"}`,
+                color: adminTab === tab ? "#c9a84c" : "rgba(240,230,200,0.3)",
+                cursor: "pointer", fontFamily: "monospace", marginBottom: -1,
+              }}>{tab}</button>
+            ))}
+          </div>
+
+          {adminTab === "control" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {[
+                { label: "Infinite Balance", sub: "Can't lose chips", checked: infiniteBalance, onChange: () => { const n = !infiniteBalRef.current; infiniteBalRef.current = n; setInfiniteBalance(n); } },
+                { label: "Auto Spin", sub: "Respins after each result", checked: autoSpin, onChange: () => { const n = !autoSpinRef.current; autoSpinRef.current = n; setAutoSpin(n); } },
+              ].map(item => (
+                <label key={item.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#f0e6c8" }}>{item.label}</div>
+                    <div style={{ fontSize: 10, color: "rgba(240,230,200,0.35)" }}>{item.sub}</div>
+                  </div>
+                  <input type="checkbox" checked={item.checked} onChange={item.onChange} style={{ width: 14, height: 14, cursor: "pointer" }} />
+                </label>
+              ))}
+              <div>
+                <div style={{ color: "rgba(240,230,200,0.4)", fontSize: 10, letterSpacing: 1, marginBottom: 6 }}>FORCE WIN SYMBOL</div>
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+                  {SYMBOLS.map((sym, idx) => (
+                    <button key={idx}
+                      onClick={() => { const n = forceWinRef.current === idx ? null : idx; forceWinRef.current = n; setForceWinSymbol(n); }}
+                      style={{
+                        padding: "5px 8px", borderRadius: 5, fontSize: sym.label.length > 1 ? 11 : 16,
+                        background: forceWinSymbol === idx ? "rgba(201,168,76,0.18)" : "rgba(255,255,255,0.05)",
+                        border: `1px solid ${forceWinSymbol === idx ? "rgba(201,168,76,0.6)" : "rgba(255,255,255,0.1)"}`,
+                        color: sym.color, cursor: "pointer",
+                      }}>{sym.label}</button>
+                  ))}
+                  {forceWinSymbol !== null && (
+                    <button onClick={() => { forceWinRef.current = null; setForceWinSymbol(null); }}
+                      style={{ padding: "4px 7px", borderRadius: 5, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", color: "#f87171", cursor: "pointer", fontSize: 10 }}>✕</button>
+                  )}
+                </div>
+                {forceWinSymbol !== null && (
+                  <div style={{ fontSize: 10, color: "#c9a84c", marginTop: 4 }}>
+                    Force: 3× {SYMBOLS[forceWinSymbol].label} ({SYMBOLS[forceWinSymbol].multiplier}× bet)
+                  </div>
+                )}
+              </div>
+              <button onClick={() => setSpinStats({ played: 0, wins: 0, losses: 0, profit: 0 })}
+                style={{ padding: "5px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, color: "rgba(240,230,200,0.4)", cursor: "pointer", fontSize: 10, letterSpacing: 1 }}>
+                RESET STATS
+              </button>
+            </div>
+          )}
+
+          {adminTab === "stats" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
+                {[{ l: "SPINS", v: spinStats.played, c: "#f0e6c8" }, { l: "WINS", v: spinStats.wins, c: "#4ade80" }, { l: "LOSSES", v: spinStats.losses, c: "#f87171" }]
+                  .map(s => (
+                    <div key={s.l} style={{ background: "rgba(0,0,0,0.3)", borderRadius: 6, padding: "7px 4px", textAlign: "center", border: "1px solid rgba(255,255,255,0.06)" }}>
+                      <div style={{ fontSize: 17, fontWeight: "bold", color: s.c }}>{s.v}</div>
+                      <div style={{ fontSize: 9, color: "rgba(240,230,200,0.4)", letterSpacing: 1 }}>{s.l}</div>
+                    </div>
+                  ))}
+              </div>
+              <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: 6, padding: "8px 10px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                  <span style={{ fontSize: 11, color: "rgba(240,230,200,0.5)" }}>Win Rate</span>
+                  <span style={{ fontSize: 11, color: "#c9a84c" }}>{spinStats.played > 0 ? ((spinStats.wins / spinStats.played) * 100).toFixed(1) : "0.0"}%</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 11, color: "rgba(240,230,200,0.5)" }}>Net P&amp;L</span>
+                  <span style={{ fontSize: 11, color: spinStats.profit >= 0 ? "#4ade80" : "#f87171" }}>{spinStats.profit >= 0 ? "+" : ""}${spinStats.profit.toFixed(2)}</span>
+                </div>
+              </div>
+              {history.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 9, color: "rgba(240,230,200,0.4)", letterSpacing: 1, marginBottom: 4 }}>RECENT RESULTS</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                    {history.map((h, i) => (
+                      <span key={i} style={{ fontSize: 10, padding: "2px 5px", borderRadius: 3,
+                        background: h.startsWith("+") ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
+                        color: h.startsWith("+") ? "#4ade80" : "#f87171" }}>{h}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </AdminPanel>
     </div>
